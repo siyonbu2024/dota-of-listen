@@ -67,6 +67,16 @@ h1{font-family:Cinzel,serif;font-weight:800;letter-spacing:.08em;margin:0;font-s
 .ab .n{position:absolute;bottom:3px;right:6px;font-size:11px;color:var(--muted)}
 .ab.heard{border-color:#6e5a34}
 .ab.playing{border-color:var(--gold);box-shadow:0 0 18px rgba(216,166,87,.6),inset 0 0 20px rgba(0,0,0,.6)}
+.ab.nosound{opacity:.35;cursor:not-allowed;border-style:dashed}
+.ab.nosound:hover{border-color:#3a4250;transform:none}
+.ab .ns{position:absolute;top:3px;left:0;right:0;font-size:10px;color:var(--muted);text-align:center}
+.ab.extra{width:70px;height:70px;align-self:center}
+.ab.extra .key{font-size:24px}
+.sep{width:1px;background:var(--line);margin:0 4px}
+.vol{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin:-4px 0 10px;color:var(--muted);font-size:14px}
+.vol button{background:none;border:none;font-size:18px;padding:2px 4px;line-height:1}
+.vol input{width:140px;accent-color:var(--gold)}
+.vol span{min-width:38px;text-align:right}
 .ab .nm{position:absolute;left:0;right:0;top:100%;margin-top:6px;font-size:12px;color:var(--gold);text-align:center;line-height:1.1}
 .reveal .abilities{margin-bottom:44px}
 
@@ -112,7 +122,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:28px;line-
 footer a{color:var(--muted)}
 @media (max-width:560px){
   .stats{grid-template-columns:repeat(2,1fr)}
-  .ab{width:70px;height:70px}
+  .ab{width:62px;height:62px}.ab.extra{width:52px;height:52px}.ab .key{font-size:24px}.ab .ns{display:none}
   .guess{flex-wrap:wrap}.guess input{flex-basis:100%}
 }
 </style>
@@ -146,6 +156,7 @@ footer a{color:var(--muted)}
 
   <!-- GAME -->
   <section id="game" class="hidden">
+    <div class="vol"><button id="mute" title="ปิด/เปิดเสียง">🔊</button><input type="range" id="vol" min="0" max="100" step="1" aria-label="ระดับเสียง"><span id="volTxt"></span></div>
     <div class="stats">
       <div class="stat"><small>Score</small><b id="sScore">0</b></div>
       <div class="stat"><small id="sLifeLbl">Lives</small><b id="sLives" class="lives"></b></div>
@@ -166,7 +177,7 @@ footer a{color:var(--muted)}
           <button class="btn" id="giveup">ยอมแพ้</button>
           <div class="sugg hidden" id="sugg"></div>
         </div>
-        <div class="hint">กด <b>Q W E R</b> (หรือ <b>1–4</b> ตอนพิมพ์อยู่) เพื่อฟังเสียง · <b>Esc</b> ออกจากช่องพิมพ์ · <b>Enter</b> เพื่อทาย</div>
+        <div class="hint">กด <b>Q W E R D F</b> (หรือ <b>1–6</b> ตอนพิมพ์อยู่) เพื่อฟังเสียง · <b>Esc</b> ออกจากช่องพิมพ์ · <b>Enter</b> เพื่อทาย</div>
       </div>
       <div class="row hidden" id="nextRow"><button class="btn primary" id="next">ฮีโร่ถัดไป (Enter)</button></div>
       <div class="toast" id="toast"></div>
@@ -205,7 +216,7 @@ footer a{color:var(--muted)}
 
 <script src="data.js"></script>
 <script>
-const KEYS = ['Q','W','E','R'];
+const KEYS = ['Q','W','E','R','D','F'];
 const IMG = n => `https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${n}.png`;
 const MODES = {
   classic:{lives:3}, sudden:{lives:1}, time:{lives:Infinity, time:120}, practice:{lives:Infinity}
@@ -244,11 +255,19 @@ function setBest(v){ try{ localStorage.setItem(bestKey(), v) }catch{} }
 
 function shuffle(a){ for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]} return a }
 
-// Pick up to 4 abilities: keep wiki order (Q W E … R), prefer the main ones.
-function pickAbilities(h){
-  const a = h.abilities;
-  if (a.length <= 4) return a;
-  return a.slice(0,4);
+// Slots 0-3 are Q W E R (in game order), 4-5 are extra abilities (D F).
+function pickAbilities(h){ return h.abilities.slice(0, KEYS.length) }
+const audible = () => state.abil.filter(a=>a.sounds.length).length;
+
+// --- volume ---
+let volume = 0.7, muted = false;
+try { const v = localStorage.getItem('dol-vol'); if (v !== null) volume = +v; muted = localStorage.getItem('dol-mute') === '1' } catch {}
+function applyVolume(){
+  $('vol').value = Math.round(volume*100);
+  $('volTxt').textContent = muted ? 'ปิด' : Math.round(volume*100) + '%';
+  $('mute').textContent = muted || volume === 0 ? '🔇' : volume < 0.4 ? '🔉' : '🔊';
+  if (audio) audio.volume = muted ? 0 : volume;
+  try { localStorage.setItem('dol-vol', volume); localStorage.setItem('dol-mute', muted ? '1' : '0') } catch {}
 }
 
 function show(id){ for(const s of ['menu','game','over']) $(s).classList.toggle('hidden', s!==id) }
@@ -301,7 +320,7 @@ function roundPoints(){
 function updateRound(){
   const p = roundPoints();
   $('rPts').textContent = p; $('rBar').style.width = p + '%';
-  $('rInfo').textContent = `ฟังไปแล้ว ${state.heard.size}/${state.abil.length} สกิล`;
+  $('rInfo').textContent = `ฟังไปแล้ว ${state.heard.size}/${audible()} สกิล`;
 }
 function updateStats(){
   $('sScore').textContent = state.score;
@@ -317,10 +336,14 @@ function renderAbilities(reveal){
   const box = $('abilities'); box.innerHTML='';
   state.abil.forEach((a,i)=>{
     const b = document.createElement('button');
-    b.className = 'ab' + (state.heard.has(i)?' heard':'');
-    b.innerHTML = `<span class="key">${KEYS[i]}</span>` + (a.sounds.length>1?`<span class="n">${a.sounds.length}♪</span>`:'') +
+    if (i === 4){ const sep = document.createElement('div'); sep.className = 'sep'; box.appendChild(sep) }
+    const none = !a.sounds.length;
+    b.className = 'ab' + (state.heard.has(i)?' heard':'') + (none?' nosound':'') + (i>=4?' extra':'');
+    b.innerHTML = `<span class="key">${KEYS[i]}</span>` + (none?'<span class="ns">ไม่มีเสียง</span>':'') +
+      (a.sounds.length>1?`<span class="n">${a.sounds.length}♪</span>`:'') +
       (reveal?`<span class="nm">${a.name}</span>`:'');
-    b.title = reveal ? a.name : 'ฟังเสียงสกิล ' + KEYS[i];
+    b.title = reveal ? a.name : none ? 'สกิลนี้ไม่มีเสียง (เช่น passive)' : 'ฟังเสียงสกิล ' + KEYS[i];
+    b.dataset.i = i;
     b.onclick = ()=>play(i);
     box.appendChild(b);
   });
@@ -331,12 +354,12 @@ function stopAudio(){
   if (playingBtn){ playingBtn.classList.remove('playing'); playingBtn=null }
 }
 function play(i){
-  if (!state || !state.abil[i]) return;
+  if (!state || !state.abil[i] || !state.abil[i].sounds.length) return;
   const a = state.abil[i];
   stopAudio();
   const url = a.sounds[Math.random()*a.sounds.length|0];
-  const snd = audio = new Audio(); snd.referrerPolicy = 'no-referrer'; snd.src = url; snd.volume = 0.8;
-  const btn = $('abilities').children[i];
+  const snd = audio = new Audio(); snd.referrerPolicy = 'no-referrer'; snd.src = url; snd.volume = muted ? 0 : volume;
+  const btn = $('abilities').querySelector(`[data-i="${i}"]`);
   playingBtn = btn; btn.classList.add('playing');
   snd.onended = ()=>{ btn.classList.remove('playing') };
   snd.play().catch(e=>{
@@ -453,6 +476,9 @@ $('modes').onclick = e=>{ const b=e.target.closest('.mode'); if(!b) return; sett
 $('attrs').onclick = e=>{ const b=e.target.closest('.chip'); if(!b) return;
   const a=b.dataset.attr; if (settings.attrs.has(a)){ if(settings.attrs.size>1) settings.attrs.delete(a) } else settings.attrs.add(a); renderMenu() };
 $('start').onclick = startGame;
+$('vol').oninput = e=>{ volume = e.target.value/100; muted = false; applyVolume() };
+$('mute').onclick = ()=>{ if (volume === 0){ volume = 0.7; muted = false } else muted = !muted; applyVolume() };
+applyVolume();
 $('again').onclick = startGame;
 $('change').onclick = renderMenu;
 $('quit').onclick = ()=>{ clearInterval(timerId); stopAudio(); state=null; renderMenu() };
@@ -467,7 +493,7 @@ $('sugg').onmousedown = e=>{ const d=e.target.closest('[data-i]'); if(!d) return
 $('guess').oninput = ()=>{ suggIdx=0; renderSugg() };
 $('guess').onblur = ()=>setTimeout(hideSugg,100);
 $('guess').onkeydown = e=>{
-  if (/^[1-4]$/.test(e.key)){ e.preventDefault(); play(+e.key-1); return }
+  if (/^[1-6]$/.test(e.key)){ e.preventDefault(); play(+e.key-1); return }
   if (e.key==='ArrowDown'){ e.preventDefault(); if(suggList.length){ suggIdx=(suggIdx+1)%suggList.length; renderSugg() } }
   else if (e.key==='ArrowUp'){ e.preventDefault(); if(suggList.length){ suggIdx=(suggIdx-1+suggList.length)%suggList.length; renderSugg() } }
   else if (e.key==='Enter'){ e.preventDefault(); submitGuess() }
@@ -482,7 +508,7 @@ document.addEventListener('keydown', e=>{
     return;
   }
   if (KEYS.includes(k)){ e.preventDefault(); play(KEYS.indexOf(k)) }
-  else if (/^[1-4]$/.test(e.key)) play(+e.key-1);
+  else if (/^[1-6]$/.test(e.key)) play(+e.key-1);
   else if (e.key.length===1 && /[a-z]/i.test(e.key)){ $('guess').focus() }
   else if (e.key==='Enter'){ $('guess').focus() }
 });
